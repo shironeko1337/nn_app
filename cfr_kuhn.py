@@ -21,22 +21,19 @@ class Node:
     # 1. get the current information set mixed strategy through regret-matching
     # similar to RPS
     # 2. adding to the strategy sum of the current node
-    def getStrategy(self, realization_weight):
+    def get_strategy(self, realization_weight):
         result = util.rectified_normalize(self.regret_sum, 1.0 / ACTIONS_N)
         self.strategy_sum += result * realization_weight
         return result
 
     # similar to RPS
-    def getAverageStrategy(self):
+    def get_average_strategy(self):
         return util.normalize(self.strategy_sum, 1.0 / ACTIONS_N)
-
-    def __str__(self):
-        return self.info + ': ' + str(self.getAverageStrategy())
 
 # from history, return the results in a tuple
 # - if it's terminal
 # - player i's utility
-def getTerminalResult(initial_state, history, i):
+def get_terminal_result(initial_state, history, i):
     if len(history) > 1:
         player_card, opponent_card = initial_state[i], initial_state[i ^ 1]
         last = history[-1]
@@ -66,7 +63,7 @@ def cfr(initial_state, history, p0, p1):
     player = turn_index & 1
     history_probability = [p0, p1][player]
     other_history_probability_multiplication = [p1, p0][player]
-    isTerminal, playerUtility = getTerminalResult(
+    isTerminal, playerUtility = get_terminal_result(
         initial_state, history, player)
 
     if isTerminal:
@@ -78,7 +75,7 @@ def cfr(initial_state, history, p0, p1):
         node = node_map[info]
     else:
         node_map[info] = node = Node(info)
-    strategy = node.getStrategy(history_probability)
+    strategy = node.get_strategy(history_probability)
     utility = [0, 0]
 
     # sum up the counterfactual regret for each action
@@ -97,7 +94,7 @@ def cfr(initial_state, history, p0, p1):
                                    p1 * strategy[action])
         node_utility += strategy[action] * utility[action]
 
-    # here nodeUtility is the weighted "best" utility, and we add up
+    # here node_utility is the weighted "best" utility, and we add up
     # the regret for each action to regret sum
     for action, action_str in enumerate(ACTIONS):
         node.regret_sum[action] += other_history_probability_multiplication * \
@@ -112,7 +109,7 @@ def train(iterations):
         cfr(cards, "", 1, 1)
 
     # average strategy for all non-terminal history
-    for info, average_strategy in node_map.items():
-        print(average_strategy)
+    for info, node in node_map.items():
+        print(f'{info}: ${str(node.get_average_strategy())}')
 
 train(1000000)
