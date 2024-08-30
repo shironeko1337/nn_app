@@ -1,116 +1,112 @@
-from typing import List, cast, Dict
-
+import util
 import numpy as np
+from collections import defaultdict
+# http://modelai.gettysburg.edu/2013/cfr/cfr.pdf
+# CFR for kuhn poker, recursive monte carlo training
 
-from labml import experiment, analytics
-from labml.configs import option
-from labml_nn.cfr import History as _History, InfoSet as _InfoSet, Action, Player, CFRConfigs
-from labml_nn.cfr.infoset_saver import InfoSetSaver
-from labml_nn.cfr.analytics import plot_infosets
+ACTIONS = 'pb'  # pass, bet
+ACTIONS_N = 2
+node_map = defaultdict(lambda: Node())
 
-# pass, bet
-ACTIONS = cast(List[Action], ['p', 'b'])
-CHANCES = cast(List[Action], ['A', 'K', 'Q'])
-PLAYERS = cast(List[Player], [0, 1])
+# a node in the game state tree which generates a new branch whenever
+# any player plays an action under any new info set
+class Node:
+    def __init__(self):
+        self.regret_sum = np.zeros(ACTIONS_N)
+        self.strategy = np.zeros(ACTIONS_N)
+        self.strategy_sum = np.zeros(ACTIONS_N)
 
+    # 1. get the current information set mixed strategy through regret-matching
+    # similar to RPS
+    # 2. adding to the strategy sum of the current node
+    def getStrategy(self, realization_weight):
+        result = util.rectified_normalize(self.regret_sum, 1.0 / ACTIONS_N)
+        self.strategy_sum += result * realization_weight
+        return result
 
-class InfoSet(_InfoSet):
-    @staticmethod
-    def from_dict(data: Dict[str, any]) -> 'InfoSet':
-        pass
-    def actions(self) -> List[Action]:
-        return ACTIONS
-    # probability of bet in the form of xx.x%
-    def __repr__(self):
-        total = sum(self.cumulative_strategy.values())
-        total = max(total, 1e-6)
-        bet = self.cumulative_strategy[cast(Action, 'b')] / total
-        return f'{bet * 100: .1f}%'
+    # similar to RPS
+    def getAverageStrategy(self):
+        return util.normalize(self.strategy_sum, 1.0 / ACTIONS_N)
 
-class History(_History):
-    history: str
-    def __init__(self, history: str = ''):
-        self.history = history
+    def __str__(self):
+        return self.info + str(self.getAverageStrategy())
 
-    # is a terminal state
-    def is_terminal(self): # for this game, verbose, but common to other games
-        if len(self.history) <= 2:
-            return False
-        elif self.history[-1] == 'p': # last pass
-            return True
-        elif self.history[-1] == 'bb': # both bets
-            return True
+# from history, return the results in a tuple
+# - if it's terminal
+# - player i's utility
+def getTerminalResult(initial_state, history, i):
+    if len(history) > 1:
+        player_card, opponent_card = initial_state[i], initial_state[i ^ 1]
+        last = history[-1]
+        last_two = history[-2:]
+        if last == 'p':
+            utility = [1, -1][player_card >
+                              opponent_card] if last_two == 'pp' else 1
+            return 1, utility
+        elif last_two == 'bb':
+            utility = [2, -2][player_card > opponent_card]
+            return 1, utility
         else:
-            return False
+            return 0, 0
+    return 0, 0
 
-    def _terminal_utility_p0(self) -> float:
-        winner = 1 if self.history[0] < self.history[1] else -1
-        if self.history[-2:] == 'bp':
-            return 1
-        elif self.history[-2:] == 'bb':
-            return winner + 1 # 1 plus 1 blind bet
-        elif self.history[-1] == 'p':
-            return winner # 1 blind bet
+# initial_state cards array, initial_state[0] is dealt to player0, initial_state[1] to player1
+# history, initially have zero length, we can get the current turn index and know which player
+#   is playing at this round, game always starts with player 0. history is public
+#   so we can simply use the player's initial card + current history to get
+#   the info of the player. Normally initial card dealing should be counted into
+#   history but here we separate it for simplicity.
+# p0 conditional probability for Player0 to reach the h with his own contribution
+# p1 similar, p0 p1 together to make sure p0 * p1 = p(h)
+# p0 and p1 all start with 1
+def cfr(initial_state, history, p0, p1):
+    turn_index = len(history)
+    player = turn_index & 1
+    history_probability = [p0, p1][player]
+    isTerminal, playerUtility = getTerminalResult(
+        initial_state, history, player)
+
+    if isTerminal:
+        return playerUtility
+
+    # we don't store the player index since size of history has it
+    info = str(initial_state[player]) + history
+    node = node_map[info]
+    node.info = info
+    strategy = node.getStrategy(history_probability)
+    utility = [0, 0]
+
+    # sum up the counterfactual regret for each action
+    nodeUtility = 0
+    for action, action_str in enumerate(ACTIONS):
+        if player == 0:
+            utility[action] = -cfr(initial_state,
+                                   history + action_str,
+                                   p0 * strategy[action],
+                                   p1)
         else:
-            raise RuntimeError()
-    def terminal_utility(self,i):
-        if i == PLAYERS[0]:
-            return self._terminal_utility_p0()
-        return -self._terminal_utility_p0() # zero sum game
+            utility[action] = -cfr(initial_state,
+                                   history + action_str,
+                                   p0,
+                                   p1 * strategy[action])
+        nodeUtility += strategy[action] * utility[action]
 
-    # is the first two chance history
-    def is_chance(self):
-        return len(self.history) < 2
+    # here nodeUtility is the weighted "best" utility, and we add up
+    # the regret for each action to regret sum
+    for action, action_str in enumerate(ACTIONS):
+        node.regret_sum[action] += history_probability * \
+            (utility[action] - nodeUtility)
 
-    # add an action to history
-    def __add__(self, other:Action):
-        return History(self.history + other)
+    return nodeUtility
 
-    def player(self):
-        return cast(Player,len(self.history) % 2)
+def train(iterations):
+    cards = np.array([0, 1, 2])
+    for _ in range(iterations):
+        np.random.shuffle(cards)
+        cfr(cards, "", 1, 1)
 
-    def sample_chance(self):
-        while True:
-            r = np.random.randint(len(CHANCES))
-            chance = CHANCES[r]
-            for c in self.history:
-                if c == chance:
-                    chance = None
-                    break
-            if chance is not None:
-                return cast(Action, chance)
+    for info, average_strategy in node_map.items():
+        print(average_strategy)
 
-    def __repr__(self):
-        return repr(self.history)
 
-    # player's info = his card and all actions
-    def info_set_key(self) -> str:
-        i = self.player()
-        return self.history[i] + self.history[2:]
-
-    def new_info_set(self) -> InfoSet:
-        return InfoSet(self.info_set_key())
-
-def create_new_history():
-    return History()
-
-class Configs(CFRConfigs):
-    pass
-
-@option(Configs.create_new_history)
-def _cnh():
-  return create_new_history
-
-def main():
-    experiment.create(name='kuhn_poker',writers={'sqlite'})
-    conf = Configs()
-    experiment.configs(conf,{'epochs': 1_000})
-    with experiment.start():
-        conf.cfr.iterate()
-    inds = analytics.runs(experiment.get_uuid())
-    plot_infosets(inds['average_strategy.*'], width=600, height=500).display()
-    analytics.scatter(inds.average_strategy_Q_b, inds.average_strategy_Kb_b,
-                  width=400, height=400)
-
-if __name__ == '__main__':
-    main()
+train(100)

@@ -1,26 +1,25 @@
 # http://modelai.gettysburg.edu/2013/cfr/cfr.pdf
-# CFR for RPS game
+# CFR for RPS game, monte carlo training
 
 import numpy as np
+import util
 
 ACTIONS = [0,1,2] # 0 = Rock, 1 = Paper, 2 = Scissor
 ACTIONS_N = len(ACTIONS)
 
 # strategy should be normalized, and be a randomized strategy when regret sum is negative
 def getStartegy(regrets):
-    regrets = np.where(regrets > 0, regrets, 0)
-    return getAverageStrategy(regrets)
+    return util.rectified_normalize(regrets, 1.0 / ACTIONS_N)
 
 def getAverageStrategy(regrets):
-    regretsSum = np.sum(regrets)
-    return regrets / regretsSum if regretsSum > 0 else np.array([1.0 / ACTIONS_N]*ACTIONS_N)
+    return util.normalize(regrets, 1.0 / ACTIONS_N)
 
 # get the utility of one's action by the set of all actions
 def getUtility(action,op_action):
     return 0 if action == op_action else [1,-1][((op_action - 1) % ACTIONS_N) == action]
 
 def getAction(strategy):
-    return np.random.choice(list(range(len(strategy))),size = 1, p=strategy)[0]
+    return np.random.choice(list(range(len(strategy))), p=strategy)
 
 # train an agent given a constant strategy of opponent
 def train_one(iteration):
@@ -42,6 +41,7 @@ def train_one(iteration):
 
     return getAverageStrategy(strategy_sum)
 
+# train both to reach Nash Equilibrium for RPS Game
 def train_both(iteration):
     strategy_op = np.array([.4,.3,.3])
     regrets = np.zeros(ACTIONS_N)
