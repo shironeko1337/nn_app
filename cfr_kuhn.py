@@ -1,17 +1,19 @@
+from functools import cache
 import util
 import numpy as np
-from collections import defaultdict
+from sortedcontainers import SortedDict
 # http://modelai.gettysburg.edu/2013/cfr/cfr.pdf
 # CFR for kuhn poker, recursive monte carlo training
 
 ACTIONS = 'pb'  # pass, bet
 ACTIONS_N = 2
-node_map = defaultdict(lambda: Node())
+node_map = SortedDict()
 
 # a node in the game state tree which generates a new branch whenever
 # any player plays an action under any new info set
 class Node:
-    def __init__(self):
+    def __init__(self, info):
+        self.info = info
         self.regret_sum = np.zeros(ACTIONS_N)
         self.strategy = np.zeros(ACTIONS_N)
         self.strategy_sum = np.zeros(ACTIONS_N)
@@ -29,7 +31,7 @@ class Node:
         return util.normalize(self.strategy_sum, 1.0 / ACTIONS_N)
 
     def __str__(self):
-        return self.info + str(self.getAverageStrategy())
+        return self.info + ': ' + str(self.getAverageStrategy())
 
 # from history, return the results in a tuple
 # - if it's terminal
@@ -40,11 +42,11 @@ def getTerminalResult(initial_state, history, i):
         last = history[-1]
         last_two = history[-2:]
         if last == 'p':
-            utility = [1, -1][player_card >
+            utility = [-1, 1][player_card >
                               opponent_card] if last_two == 'pp' else 1
             return 1, utility
         elif last_two == 'bb':
-            utility = [2, -2][player_card > opponent_card]
+            utility = [-2, 2][player_card > opponent_card]
             return 1, utility
         else:
             return 0, 0
@@ -63,6 +65,7 @@ def cfr(initial_state, history, p0, p1):
     turn_index = len(history)
     player = turn_index & 1
     history_probability = [p0, p1][player]
+    other_history_probability_multiplication = [p1, p0][player]
     isTerminal, playerUtility = getTerminalResult(
         initial_state, history, player)
 
@@ -71,33 +74,36 @@ def cfr(initial_state, history, p0, p1):
 
     # we don't store the player index since size of history has it
     info = str(initial_state[player]) + history
-    node = node_map[info]
-    node.info = info
+    if info in node_map:
+        node = node_map[info]
+    else:
+        node_map[info] = node = Node(info)
     strategy = node.getStrategy(history_probability)
     utility = [0, 0]
 
     # sum up the counterfactual regret for each action
-    nodeUtility = 0
+    node_utility = 0
     for action, action_str in enumerate(ACTIONS):
+        next_history = history + action_str
         if player == 0:
             utility[action] = -cfr(initial_state,
-                                   history + action_str,
+                                   next_history,
                                    p0 * strategy[action],
                                    p1)
         else:
             utility[action] = -cfr(initial_state,
-                                   history + action_str,
+                                   next_history,
                                    p0,
                                    p1 * strategy[action])
-        nodeUtility += strategy[action] * utility[action]
+        node_utility += strategy[action] * utility[action]
 
     # here nodeUtility is the weighted "best" utility, and we add up
     # the regret for each action to regret sum
     for action, action_str in enumerate(ACTIONS):
-        node.regret_sum[action] += history_probability * \
-            (utility[action] - nodeUtility)
+        node.regret_sum[action] += other_history_probability_multiplication * \
+            (utility[action] - node_utility)
 
-    return nodeUtility
+    return node_utility
 
 def train(iterations):
     cards = np.array([0, 1, 2])
@@ -105,8 +111,8 @@ def train(iterations):
         np.random.shuffle(cards)
         cfr(cards, "", 1, 1)
 
+    # average strategy for all non-terminal history
     for info, average_strategy in node_map.items():
         print(average_strategy)
 
-
-train(100)
+train(1000000)
