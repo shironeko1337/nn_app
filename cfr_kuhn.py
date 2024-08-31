@@ -3,7 +3,8 @@ import util
 import numpy as np
 from sortedcontainers import SortedDict
 # http://modelai.gettysburg.edu/2013/cfr/cfr.pdf
-# CFR for kuhn poker, recursive monte carlo training
+# https://en.wikipedia.org/wiki/Kuhn_poker
+# CFR for kuhn poker, monte carlo training
 
 ACTIONS = 'pb'  # pass, bet
 ACTIONS_N = 2
@@ -15,7 +16,6 @@ class Node:
     def __init__(self, info):
         self.info = info
         self.regret_sum = np.zeros(ACTIONS_N)
-        self.strategy = np.zeros(ACTIONS_N)
         self.strategy_sum = np.zeros(ACTIONS_N)
 
     # 1. get the current information set mixed strategy through regret-matching
@@ -30,9 +30,15 @@ class Node:
     def get_average_strategy(self):
         return util.normalize(self.strategy_sum, 1.0 / ACTIONS_N)
 
-# from history, return the results in a tuple
+# from history, return
 # - if it's terminal
-# - player i's utility
+# - utility for the opponent player in the **last** round.
+#   It's the same index of the "current" player but it makes no sense
+#   because in the beginning of the cfr process, it has no information of the
+#   current round, so we should only talk about the last round.
+#   this could also explain why we need a 'negative' before cfr in the
+#   recursive call.
+#   can be omitted if it's not terminal
 def get_terminal_result(initial_state, history, i):
     if len(history) > 1:
         player_card, opponent_card = initial_state[i], initial_state[i ^ 1]
@@ -60,6 +66,7 @@ def get_terminal_result(initial_state, history, i):
 # p0 and p1 all start with 1
 def cfr(initial_state, history, p0, p1):
     turn_index = len(history)
+    # get the opponent player from the last round or the current player
     player = turn_index & 1
     history_probability = [p0, p1][player]
     other_history_probability_multiplication = [p1, p0][player]

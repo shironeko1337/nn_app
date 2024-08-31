@@ -1,8 +1,8 @@
-# Applications of Neural Network
+# AI Demo
 
 ## CFR demos
 Python implementation of demo programs using CFR for games. For
-reading the code from beginning, it's high suggested that you follow the order of RPS -> Recursive kuhn poker -> DP kuhn poker. All these demos are designed for finding
+reading the code from beginning, it's high suggested that you follow the order of RPS -> kuhn poker -> dudo because comments are added only when necessary without repetition. All these demos are designed for finding
 a strategy to get **close** to Nash Equalibrium in a sequential **two** player **zero sum** game.
 
 ### RPS
